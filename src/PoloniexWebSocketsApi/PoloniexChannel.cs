@@ -25,6 +25,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Net.WebSockets;
 using System.Text;
@@ -44,12 +45,12 @@ namespace PoloniexWebSocketsApi
         private static readonly ILog Logger = LogProvider.For<PoloniexChannel>();
 
         private readonly JsonSerializer mSerializer;
-        private readonly ClientWebSocket mWebSocket;
+        private ClientWebSocket mWebSocket;
         private CancellationTokenSource mCancellationTokenSource;
         private readonly Uri mAddressUri;
         private CancellationToken mCancellationToken;
 
-        public PoloniexChannel(JsonSerializer jsonSerializer = null) : 
+        public PoloniexChannel(JsonSerializer jsonSerializer = null) :
             this(new Uri("wss://api2.poloniex.com"), jsonSerializer)
         {
         }
@@ -73,7 +74,7 @@ namespace PoloniexWebSocketsApi
         private ArraySegment<byte> GetMessageInBytes(PoloniexCommand command)
         {
             StringWriter writer = new StringWriter();
-            JsonTextWriter tokenWriter = new JsonTextWriter(writer){Formatting = Formatting.None};
+            JsonTextWriter tokenWriter = new JsonTextWriter(writer) { Formatting = Formatting.None };
             mSerializer.Serialize(tokenWriter, command);
             string formatted = writer.ToString();
 
@@ -86,18 +87,29 @@ namespace PoloniexWebSocketsApi
 
         public async Task ConnectAsync()
         {
-            try
+            do
             {
-                await mWebSocket.ConnectAsync(mAddressUri, mCancellationToken)
-                          .ConfigureAwait(false);
+                try
+                {
+                    await mWebSocket.ConnectAsync(mAddressUri, mCancellationToken)
+                              .ConfigureAwait(false);
 
-                Task task = Task.Run(this.RunAsync, mCancellationToken);
-            }
-            catch (Exception ex)
-            {
-                RaiseConnectionError(ex);
-                RaiseConnectionClosed();
-            }
+                    Task task = Task.Run(this.RunAsync, mCancellationToken);
+                    break;
+                }
+                catch (WebSocketException wex)
+                {
+                    mWebSocket.Abort();
+                    mWebSocket = new ClientWebSocket();
+                    Debug.WriteLine("websocket exception ");
+                }
+                catch (Exception ex)
+                {
+                    RaiseConnectionError(ex);
+                    RaiseConnectionClosed();
+                    break;
+                }
+            } while (true);
         }
 
         private async Task RunAsync()
